@@ -1,14 +1,17 @@
-from base import BaseModel
-from keras.layers import Conv2D
-from keras.layers import Flatten
-from tensorflow.keras import layers
 
-import os
-import numpy as np
+from tensorflow.keras import layers
 import matplotlib.pylab as plt
 from matplotlib.pyplot import savefig
-import tensorflow as tf
 import tensorflow_probability as tfp
+
+import os
+
+os.environ["KERAS_BACKEND"] = "tensorflow"
+
+import numpy as np
+import tensorflow as tf
+import keras
+from keras import layers
 
 
 tfd = tfp.distributions
@@ -204,30 +207,30 @@ class Encoder(layers.Layer):
     
   
 
-def call(self, inputs):
+  def call(self, inputs):
 
-  if self.config['l_win'] == 24:
-    paddings = tf.constant([[0, 0], [4, 4], [0, 0], [0, 0]])  
-    inputs   = tf.pad(input, paddings, "SYMMETRIC")
+    if self.config['l_win'] == 24:
+      paddings = tf.constant([[0, 0], [4, 4], [0, 0], [0, 0]])  
+      inputs   = tf.pad(input, paddings, "SYMMETRIC")
   
-  x = self.conv_1(inputs)
-  x = self.conv_2(x)
-  x = self.conv_3(x)
-  x = self.conv_4(x)
+    x = self.conv_1(inputs)
+    x = self.conv_2(x)
+    x = self.conv_3(x)
+    x = self.conv_4(x)
 
-  x = tf.keras.backend.flatten(x)
-  x = self.flatten(x)
+    x = tf.keras.backend.flatten(x)
+    x = self.flatten(x)
 
-  x = self.dense(x)
+    x = self.dense(x)
 
-  z_mean = self.dense_mean(x)
+    z_mean = self.dense_mean(x)
   
-  z_std  = self.dense_std(x)
-  z_std  = z_std + 1e-2
+    z_std  = self.dense_std(x)
+    z_std  = z_std + 1e-2
 
-  z = self.sampling((z_mean, z_std))
+    z = self.sampling((z_mean, z_std))
 
-  return z_mean, z_std, z
+    return z_mean, z_std, z
 
 
 
@@ -327,6 +330,80 @@ class Decoder(layers.Layer):
 
 ################################## VAE MODEL #############################
 
+
+class VAE(keras.Model):
+    def __init__(self, config, **kwargs):
+        super().__init__(**kwargs)
+        
+        self.config  = config
+        
+        self.encoder = Encoder(self.config)
+        self.decoder = Decoder(self.config)
+        
+        self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
+        self.reconstruction_loss_tracker = keras.metrics.Mean(
+            name="reconstruction_loss"
+        )
+        self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+
+    @property
+    def metrics(self):
+        return [
+            self.total_loss_tracker,
+            self.reconstruction_loss_tracker,
+            self.kl_loss_tracker,
+        ]
+
+    
+    def train_step(self, data):
+        with tf.GradientTape() as tape:
+            z_mean, z_log_var, z = self.encoder(data)
+            reconstruction = self.decoder(z)
+            reconstruction_loss = tf.reduce_mean(
+                tf.reduce_sum(
+                    keras.losses.binary_crossentropy(data, reconstruction),
+                    axis=(1, 2),
+                )
+            )
+            kl_loss = -0.5 * (1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var))
+            kl_loss = tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
+            total_loss = reconstruction_loss + kl_loss
+        
+        grads = tape.gradient(total_loss, self.trainable_weights)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        
+        self.total_loss_tracker.update_state(total_loss)
+        self.reconstruction_loss_tracker.update_state(reconstruction_loss)
+        self.kl_loss_tracker.update_state(kl_loss)
+        
+        return {
+            "loss": self.total_loss_tracker.result(),
+            "reconstruction_loss": self.reconstruction_loss_tracker.result(),
+            "kl_loss": self.kl_loss_tracker.result(),
+              }   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class VAEmodel(tf.keras.Model):
   def __init__(self, config):
     super().__init__(config)
@@ -347,338 +424,7 @@ class VAEmodel(tf.keras.Model):
 
 
   
-  #################### ENCODER ##################
   
-  def build_encoder(self):
-    
-    init = tf.keras.initializers.GlorotUniform()
-    
-    inputs = tf.keras.Input(shape=(self.config['l_win'], self.config['n_channel']))
-    input_tensor = tf.expand_dims(inputs, -1)
-      
-      
-      
-    ##########  24 Encoder ###########
-
-    if self.config['l_win'] == 24:
-        paddings = tf.constant([[0, 0], [4, 4], [0, 0], [0, 0]])  # Step 3
-        input_tensor_padded = tf.pad(input_tensor, paddings, "SYMMETRIC")  # Step 3
-        conv_1 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 16,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(2, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(input_tensor_padded)  # Step 4
-        print("conv_1: {}".format(conv_1))
-        conv_2 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 8,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(2, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_1)  # Step 4
-        print("conv_2: {}".format(conv_2))
-        conv_3 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 4,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(2, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_2)  # Step 4
-        print("conv_3: {}".format(conv_3))
-        conv_4 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'],
-                                        kernel_size=(4, self.config['n_channel']),
-                                        strides=1,
-                                        padding='valid',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_3)  # Step 4
-        print("conv_4: {}".format(conv_4))
-      
-    ###########  48 Encoder ###########
-
-    elif self.config['l_win'] == 48:
-        conv_1 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 16,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(2, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(input_tensor)  # Step 4
-        print("conv_1: {}".format(conv_1))
-        conv_2 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 8,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(2, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_1)  # Step 4
-        print("conv_2: {}".format(conv_2))
-        conv_3 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 4,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(2, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_2)  # Step 4
-        print("conv_3: {}".format(conv_3))
-        conv_4 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'],
-                                        kernel_size=(6, self.config['n_channel']),
-                                        strides=1,
-                                        padding='valid',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_3)  # Step 4
-        print("conv_4: {}".format(conv_4))
-      
-      
-    #############  144 Encoder #############
-        
-    elif self.config['l_win'] == 144:
-        conv_1 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 16,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(4, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(input_tensor)  # Step 4
-        print("conv_1: {}".format(conv_1))
-        conv_2 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 8,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(4, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_1)  # Step 4
-        print("conv_2: {}".format(conv_2))
-        conv_3 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'] // 4,
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=(3, 1),
-                                        padding='same',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_2)  # Step 4
-        print("conv_3: {}".format(conv_3))
-        conv_4 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'],
-                                        kernel_size=(3, self.config['n_channel']),
-                                        strides=1,
-                                        padding='valid',
-                                        activation='leaky_relu',
-                                        kernel_initializer=init)(conv_3)  # Step 4
-        print("conv_4: {}".format(conv_4))
-
-    
-    
-    ########  CODE MEAN + CODE STD DEV #########
-      
-    # Step 5: Convert SymbolicTensor to concrete tensor before passing to Flatten
-    
-    conv_4_flat = tf.keras.backend.flatten(conv_4)
-    
-    encoded_signal = tf.keras.layers.Flatten()(conv_4_flat)  # Step 5
-      
-      
-    encoded_signal = tf.keras.layers.Dense(units=self.config['code_size'] * 4,
-                                             activation=tf.nn.leaky_relu,
-                                             kernel_initializer=init)(encoded_signal)  # Step 6
-
-    code_mean = tf.keras.layers.Dense(units=self.config['code_size'],
-                                             activation=None,
-                                             kernel_initializer=init,
-                                             name='code_mean')(encoded_signal)  # Step 6
-                                             
-    code_std_dev = tf.keras.layers.Dense(units=self.config['code_size'],
-                                                activation=tf.nn.relu,
-                                                kernel_initializer=init,
-                                                name='code_std_dev')(encoded_signal)  # Step 6
-    code_std_dev = code_std_dev + 1e-2
-
-    code_mean = tf.convert_to_tensor(code_mean)
-    code_std_dev = tf.convert_to_tensor(code_std_dev)
-    
-    ##### DEBUG ####
-    print(code_mean.shape)
-    print(code_std_dev.shape)
-    ##### END ######
-
-    mvn = tfp.distributions.MultivariateNormalDiag(loc=code_mean, scale_diag=code_std_dev)
-    code_sample = mvn.sample()
-    
-    print("finish encoder: \n{}".format(self.pppppppp))
-    print("\n")
-
-    # Return the encoder as a callable function
-    return tf.keras.Model(inputs=inputs, outputs=[code_mean, code_std_dev, code_sample])
-
-
-  
-  
-  ##############  Decoder ################
-
-  def build_decoder(self):
-    
-    init = tf.keras.initializers.GlorotUniform()  # Step 1
-    code_input = tf.keras.Input(shape=(self.config['code_size'],))
-    
-  
-    encoded = tf.keras.layers.Dense(units=self.config['num_hidden_units'],
-                                    activation=tf.nn.leaky_relu,
-                                    kernel_initializer=init)(code_input)  # Step 6
-    decoded_1 = tf.keras.layers.Reshape((1, 1, self.config['num_hidden_units']))(encoded)
-      
-      
-    #######  24 Decoder ########
-
-    if self.config['l_win'] == 24:
-        decoded_2 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'],
-                                           kernel_size=1,
-                                           padding='same',
-                                           activation=tf.nn.leaky_relu)(decoded_1)  # Step 6
-        decoded_2 = tf.reshape(decoded_2, [-1, 4, 1, self.config['num_hidden_units'] // 4])
-        print("decoded_2 is: {}".format(decoded_2))
-        
-        decoded_3 = tf.keras.layers.Conv2DTranspose(filters=self.config['num_hidden_units'] // 4,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_2)  # Step 7
-        decoded_3 = tf.nn.depth_to_space(input=decoded_3,
-                                         block_size=2)
-        decoded_3 = tf.reshape(decoded_3, [-1, 8, 1, self.config['num_hidden_units'] // 8])
-        print("decoded_3 is: {}".format(decoded_3))
-
-
-        decoded_4 = tf.keras.layers.Conv2DTranspose(filters=self.config['num_hidden_units'] // 8,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_3)  # Step 7
-        decoded_4 = tf.nn.depth_to_space(input=decoded_4,
-                                         block_size=2)
-        decoded_4 = tf.reshape(decoded_4, [-1, 16, 1, self.config['num_hidden_units'] // 16])
-        print("decoded_4 is: {}".format(decoded_4))
-
-
-        decoded_5 = tf.keras.layers.Conv2DTranspose(filters=self.config['num_hidden_units'] // 16,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_4)  # Step 7
-        decoded_5 = tf.nn.depth_to_space(input=decoded_5,
-                                         block_size=2)
-        decoded_5 = tf.reshape(decoded_5, [-1, self.config['num_hidden_units'] // 16, 1, 16])
-        print("decoded_5 is: {}".format(decoded_5))
-
-
-        decoded = tf.keras.layers.Conv2DTranspose(filters=self.config['n_channel'],
-                                                  kernel_size=(9, 1),
-                                                  strides=1,
-                                                  padding='valid',
-                                                  activation=None,
-                                                  kernel_initializer=init)(decoded_5)  # Step 7
-        print("decoded_6 is: {}".format(decoded))
-        self.decoded = tf.reshape(decoded, [-1, self.config['l_win'], self.config['n_channel']])
-      
-      
-    ###########  48 Decoder ###########
-        
-    elif self.config['l_win'] == 48:
-        decoded_2 = tf.keras.layers.Conv2DTranspose(filters=256 * 3,
-                                                    kernel_size=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu)(decoded_1)  # Step 7
-        decoded_2 = tf.reshape(decoded_2, [-1, 3, 1, 256])
-        print("decoded_2 is: {}".format(decoded_2))
-        
-        decoded_3 = tf.keras.layers.Conv2DTranspose(filters=256,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_2)  # Step 7
-        decoded_3 = tf.nn.depth_to_space(input=decoded_3,
-                                         block_size=2)
-        decoded_3 = tf.reshape(decoded_3, [-1, 6, 1, 128])
-        print("decoded_3 is: {}".format(decoded_3))
-        
-        decoded_4 = tf.keras.layers.Conv2DTranspose(filters=128,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_3)  # Step 7
-        decoded_4 = tf.nn.depth_to_space(input=decoded_4,
-                                         block_size=2)
-        decoded_4 = tf.reshape(decoded_4, [-1, 24, 1, 32])
-        print("decoded_4 is: {}".format(decoded_4))
-        
-        decoded_5 = tf.keras.layers.Conv2DTranspose(filters=32,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_4)  # Step 7
-        decoded_5 = tf.nn.depth_to_space(input=decoded_5,
-                                         block_size=2)
-        decoded_5 = tf.reshape(decoded_5, [-1, 48, 1, 16])
-        print("decoded_5 is: {}".format(decoded_5))
-        
-        decoded = tf.keras.layers.Conv2DTranspose(filters=1,
-                                                  kernel_size=(5, self.config['n_channel']),
-                                                  strides=1,
-                                                  padding='same',
-                                                  activation=None,
-                                                  kernel_initializer=init)(decoded_5)  # Step 7
-        print("decoded_6 is: {}".format(decoded))
-        self.decoded = tf.reshape(decoded, [-1, self.config['l_win'], self.config['n_channel']])
-      
-      
-    ########  144 Decoder ########
-        
-    elif self.config['l_win'] == 144:
-        decoded_2 = tf.keras.layers.Conv2DTranspose(filters=32 * 27,
-                                                    kernel_size=1,
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu)(decoded_1)  # Step 7
-        decoded_2 = tf.reshape(decoded_2, [-1, 3, 1, 32 * 9])
-        print("decoded_2 is: {}".format(decoded_2))
-        decoded_3 = tf.keras.layers.Conv2DTranspose(filters=32 * 9,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_2)  # Step 7
-        decoded_3 = tf.nn.depth_to_space(input=decoded_3, block_size=3)
-        
-        decoded_3 = tf.reshape(decoded_3, [-1, 9, 1, 32 * 3])
-        print("decoded_3 is: {}".format(decoded_3))
-        decoded_4 = tf.keras.layers.Conv2DTranspose(filters=32 * 3,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_3)  # Step 7
-        decoded_4 = tf.nn.depth_to_space(input=decoded_4,
-                                        block_size=2)
-        decoded_4 = tf.reshape(decoded_4, [-1, 36, 1, 24])
-        print("decoded_4 is: {}".format(decoded_4))
-
-        decoded_5 = tf.keras.layers.Conv2DTranspose(filters=24,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_4)  # Step 7
-        decoded_5 = tf.nn.depth_to_space(input=decoded_5, block_size=2)
-        decoded_5 = tf.reshape(decoded_5, [-1, 144, 1, 6])
-        print("decoded_5 is: {}".format(decoded_5))
-
-        decoded = tf.keras.layers.Conv2DTranspose(filters=1,
-                                                  kernel_size=(9, self.config['n_channel']),
-                                                  strides=1,
-                                                  padding='same',
-                                                  activation=None,
-                                                  kernel_initializer=init)(decoded_5)  # Step 7
-        print("decoded_6 is: {}".format(decoded))
-        self.decoded = tf.reshape(decoded, [-1, self.config['l_win'], self.config['n_channel']])
-        print("finish decoder: \n{}".format(self.decoded))
-        print('\n')
-
-        return tf.keras.Model(inputs=[code_input], outputs=decoded)
 
 
   
@@ -800,6 +546,18 @@ class VAEmodel(tf.keras.Model):
     return {m.name: m.result() for m in self.metrics}
 
 ############################ LSTM ####################################
+
+
+
+
+
+
+
+
+
+
+
+
 class lstmKerasModel(tf.keras.Model):
   
   def __init__(self, config):
