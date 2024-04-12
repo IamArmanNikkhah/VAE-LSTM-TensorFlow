@@ -20,10 +20,14 @@ class lstmKerasModel(tf.keras.Model):
 
   def create_lstm_model(self):
     lstm_input = tf.keras.layers.Input(shape=(self.config['l_seq'] - 1, self.config['code_size']))
+    
     LSTM1 = tf.keras.layers.LSTM(self.config['num_hidden_units_lstm'], return_sequences=True)(lstm_input)
     LSTM2 = tf.keras.layers.LSTM(self.config['num_hidden_units_lstm'], return_sequences=True)(LSTM1)
+    
     lstm_output = tf.keras.layers.LSTM(self.config['code_size'], return_sequences=True, activation=None)(LSTM2)
+    
     lstm_model = tf.keras.Model(lstm_input, lstm_output)
+    
     lstm_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.config['learning_rate_lstm']),
                        loss='mse',
                        metrics=['mse'])
