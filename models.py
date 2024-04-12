@@ -237,186 +237,90 @@ def call(self, inputs):
 
 
 class Decoder(layers.Layer):
-  def __init__(self, name='decoder', **kwargs):
+  def __init__(self, config, name='encoder', **kwargs):
     super(Decoder, self).__init__(name=name, **kwargs)
 
+    self.config = config
+    
+    self.window_size  = self.config['l_win']
+    self.num_channels = self.config['n_channels']
+    self.model        = self.build_decoder()
 
   
   def build_decoder(self):
-    
-    init = tf.keras.initializers.GlorotUniform()  # Step 1
-    code_input = tf.keras.Input(shape=(self.config['code_size'],))
-    
+        
+        
+        if self.window_size == 24:
+            # Architecture for window size 24
+            inputs = layers.Input(shape=(None,))
+            x = layers.Dense(4 * 4 * 128, activation='relu')(inputs)
+            x = layers.Reshape((4, 4, 128))(x)
+            x = layers.Conv2DTranspose(128, 3, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            x = layers.Conv2DTranspose(64, 3, strides=3, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            outputs = layers.Conv2DTranspose(self.num_channels, 3, activation='sigmoid', padding='same')(x)
+            return tf.keras.Model(inputs=inputs, outputs=outputs)
+        
+        
+        elif self.window_size == 48:
+            # Architecture for window size 48
+            inputs = layers.Input(shape=(None,))
+            x = layers.Dense(4 * 4 * 256, activation='relu')(inputs)
+            x = layers.Reshape((4, 4, 256))(x)
+            x = layers.Conv2DTranspose(256, 3, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            x = layers.Conv2DTranspose(128, 3, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            x = layers.Conv2DTranspose(64, 5, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            outputs = layers.Conv2DTranspose(self.num_channels, 5, activation='sigmoid', padding='same')(x)
+            return tf.keras.Model(inputs=inputs, outputs=outputs)
+        
+        
+        
+        elif self.window_size == 144:
+            # Architecture for window size 144
+            inputs = layers.Input(shape=(None,))
+            x = layers.Dense(6 * 6 * 512, activation='relu')(inputs)
+            x = layers.Reshape((6, 6, 512))(x)
+            x = layers.Conv2DTranspose(512, 3, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            x = layers.Conv2DTranspose(256, 3, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            x = layers.Conv2DTranspose(128, 5, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            x = layers.Conv2DTranspose(64, 5, strides=2, padding='same')(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(0.3)(x)
+            outputs = layers.Conv2DTranspose(self.num_channels, 7, activation='sigmoid', padding='same')(x)
+            return tf.keras.Model(inputs=inputs, outputs=outputs)
+        
+
+        else:
+            raise ValueError(f"Unsupported window size: {self.window_size}")
+        
   
-    encoded = tf.keras.layers.Dense(units=self.config['num_hidden_units'],
-                                    activation=tf.nn.leaky_relu,
-                                    kernel_initializer=init)(code_input)  # Step 6
-    decoded_1 = tf.keras.layers.Reshape((1, 1, self.config['num_hidden_units']))(encoded)
-      
-      
-    #######  24 Decoder ########
-
-    if self.config['l_win'] == 24:
-        
-        decoded_2 = tf.keras.layers.Conv2D(filters=self.config['num_hidden_units'],
-                                           kernel_size=1,
-                                           padding='same',
-                                           activation=tf.nn.leaky_relu)(decoded_1)  # Step 6
-        decoded_2 = tf.reshape(decoded_2, [-1, 4, 1, self.config['num_hidden_units'] // 4])
-        print("decoded_2 is: {}".format(decoded_2))
-        
-        decoded_3 = tf.keras.layers.Conv2DTranspose(filters=self.config['num_hidden_units'] // 4,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_2)  # Step 7
-        decoded_3 = tf.nn.depth_to_space(input=decoded_3,
-                                         block_size=2)
-        decoded_3 = tf.reshape(decoded_3, [-1, 8, 1, self.config['num_hidden_units'] // 8])
-        print("decoded_3 is: {}".format(decoded_3))
-
-
-        decoded_4 = tf.keras.layers.Conv2DTranspose(filters=self.config['num_hidden_units'] // 8,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_3)  # Step 7
-        decoded_4 = tf.nn.depth_to_space(input=decoded_4,
-                                         block_size=2)
-        decoded_4 = tf.reshape(decoded_4, [-1, 16, 1, self.config['num_hidden_units'] // 16])
-        print("decoded_4 is: {}".format(decoded_4))
-
-
-        decoded_5 = tf.keras.layers.Conv2DTranspose(filters=self.config['num_hidden_units'] // 16,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_4)  # Step 7
-        decoded_5 = tf.nn.depth_to_space(input=decoded_5,
-                                         block_size=2)
-        decoded_5 = tf.reshape(decoded_5, [-1, self.config['num_hidden_units'] // 16, 1, 16])
-        print("decoded_5 is: {}".format(decoded_5))
-
-
-        decoded = tf.keras.layers.Conv2DTranspose(filters=self.config['n_channel'],
-                                                  kernel_size=(9, 1),
-                                                  strides=1,
-                                                  padding='valid',
-                                                  activation=None,
-                                                  kernel_initializer=init)(decoded_5)  # Step 7
-        print("decoded_6 is: {}".format(decoded))
-        self.decoded = tf.reshape(decoded, [-1, self.config['l_win'], self.config['n_channel']])
-      
-      
-    ###########  48 Decoder ###########
-        
-    elif self.config['l_win'] == 48:
-        decoded_2 = tf.keras.layers.Conv2DTranspose(filters=256 * 3,
-                                                    kernel_size=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu)(decoded_1)  # Step 7
-        decoded_2 = tf.reshape(decoded_2, [-1, 3, 1, 256])
-        print("decoded_2 is: {}".format(decoded_2))
-        
-        decoded_3 = tf.keras.layers.Conv2DTranspose(filters=256,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_2)  # Step 7
-        decoded_3 = tf.nn.depth_to_space(input=decoded_3,
-                                         block_size=2)
-        decoded_3 = tf.reshape(decoded_3, [-1, 6, 1, 128])
-        print("decoded_3 is: {}".format(decoded_3))
-        
-        decoded_4 = tf.keras.layers.Conv2DTranspose(filters=128,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_3)  # Step 7
-        decoded_4 = tf.nn.depth_to_space(input=decoded_4,
-                                         block_size=2)
-        decoded_4 = tf.reshape(decoded_4, [-1, 24, 1, 32])
-        print("decoded_4 is: {}".format(decoded_4))
-        
-        decoded_5 = tf.keras.layers.Conv2DTranspose(filters=32,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_4)  # Step 7
-        decoded_5 = tf.nn.depth_to_space(input=decoded_5,
-                                         block_size=2)
-        decoded_5 = tf.reshape(decoded_5, [-1, 48, 1, 16])
-        print("decoded_5 is: {}".format(decoded_5))
-        
-        decoded = tf.keras.layers.Conv2DTranspose(filters=1,
-                                                  kernel_size=(5, self.config['n_channel']),
-                                                  strides=1,
-                                                  padding='same',
-                                                  activation=None,
-                                                  kernel_initializer=init)(decoded_5)  # Step 7
-        print("decoded_6 is: {}".format(decoded))
-        self.decoded = tf.reshape(decoded, [-1, self.config['l_win'], self.config['n_channel']])
-      
-      
-    ########  144 Decoder ########
-        
-    elif self.config['l_win'] == 144:
-        decoded_2 = tf.keras.layers.Conv2DTranspose(filters=32 * 27,
-                                                    kernel_size=1,
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu)(decoded_1)  # Step 7
-        decoded_2 = tf.reshape(decoded_2, [-1, 3, 1, 32 * 9])
-        print("decoded_2 is: {}".format(decoded_2))
-        decoded_3 = tf.keras.layers.Conv2DTranspose(filters=32 * 9,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_2)  # Step 7
-        decoded_3 = tf.nn.depth_to_space(input=decoded_3, block_size=3)
-        
-        decoded_3 = tf.reshape(decoded_3, [-1, 9, 1, 32 * 3])
-        print("decoded_3 is: {}".format(decoded_3))
-        decoded_4 = tf.keras.layers.Conv2DTranspose(filters=32 * 3,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_3)  # Step 7
-        decoded_4 = tf.nn.depth_to_space(input=decoded_4,
-                                        block_size=2)
-        decoded_4 = tf.reshape(decoded_4, [-1, 36, 1, 24])
-        print("decoded_4 is: {}".format(decoded_4))
-
-        decoded_5 = tf.keras.layers.Conv2DTranspose(filters=24,
-                                                    kernel_size=(3, 1),
-                                                    strides=1,
-                                                    padding='same',
-                                                    activation=tf.nn.leaky_relu,
-                                                    kernel_initializer=init)(decoded_4)  # Step 7
-        decoded_5 = tf.nn.depth_to_space(input=decoded_5, block_size=2)
-        decoded_5 = tf.reshape(decoded_5, [-1, 144, 1, 6])
-        print("decoded_5 is: {}".format(decoded_5))
-
-        decoded = tf.keras.layers.Conv2DTranspose(filters=1,
-                                                  kernel_size=(9, self.config['n_channel']),
-                                                  strides=1,
-                                                  padding='same',
-                                                  activation=None,
-                                                  kernel_initializer=init)(decoded_5)  # Step 7
-        print("decoded_6 is: {}".format(decoded))
-        self.decoded = tf.reshape(decoded, [-1, self.config['l_win'], self.config['n_channel']])
-        print("finish decoder: \n{}".format(self.decoded))
-        print('\n')
-
-        return tf.keras.Model(inputs=[code_input], outputs=decoded)
+  def call(self, inputs):
+        # Process the inputs through the decoder model
+        return self.model(inputs)  
 
 
 
